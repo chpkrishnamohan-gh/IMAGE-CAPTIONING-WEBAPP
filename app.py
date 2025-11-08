@@ -1,8 +1,10 @@
 import streamlit as st
 import os
 import re
-import tkinter as tk
-from tkinter import filedialog
+import sys
+import tempfile
+import subprocess
+import textwrap
 from PIL import Image
 import pandas as pd
 
@@ -15,15 +17,85 @@ CAPTIONS_FILE = "captions.csv"
 LANDMARKS_FILE = "landmarks.csv"
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff")
 
-# ===================== Utilities =====================
-def select_folder_dialog():
+# ------------------ Native folder picker helper (subprocess) ------------------
+# We'll create a temporary helper script that uses tkinter, run it as a subprocess,
+# and read the chosen folder path from a temp file.
+TMP_PICK_DIR = tempfile.gettempdir()
+TMP_PICK_PATH = os.path.join(TMP_PICK_DIR, "st_folder_pick.txt")
+TMP_PICK_SCRIPT = os.path.join(TMP_PICK_DIR, "st_folder_picker_helper.py")
+
+PICKER_SCRIPT_CONTENT = textwrap.dedent(r'''
+import tkinter as tk
+from tkinter import filedialog
+import sys, os
+outpath = sys.argv[1] if len(sys.argv) > 1 else None
+try:
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)
     folder = filedialog.askdirectory(title="Select the folder with images")
     root.destroy()
-    return folder
+    if outpath:
+        with open(outpath, "w", encoding="utf-8") as fh:
+            fh.write(folder if folder else "")
+except Exception:
+    try:
+        if outpath:
+            with open(outpath, "w", encoding="utf-8") as fh:
+                fh.write("")
+    except Exception:
+        pass
+''')
 
+def browse_folder_native_blocking():
+    """
+    Creates and runs a small helper script that opens a native folder dialog (tkinter)
+    in a separate process and writes the chosen path into TMP_PICK_PATH.
+    Returns the chosen path (string) or None if cancelled/failed.
+    """
+    # ensure old tmp is removed
+    try:
+        if os.path.exists(TMP_PICK_PATH):
+            os.remove(TMP_PICK_PATH)
+    except Exception:
+        pass
+
+    # write helper script
+    try:
+        with open(TMP_PICK_SCRIPT, "w", encoding="utf-8") as fh:
+            fh.write(PICKER_SCRIPT_CONTENT)
+    except Exception as e:
+        st.error(f"Could not write helper script: {e}")
+        return None
+
+    # run helper script with the same python interpreter
+    try:
+        subprocess.run([sys.executable, TMP_PICK_SCRIPT, TMP_PICK_PATH])
+    except Exception as e:
+        st.error(f"Failed to launch folder picker helper: {e}")
+        return None
+
+    # read back chosen folder
+    try:
+        if os.path.exists(TMP_PICK_PATH):
+            with open(TMP_PICK_PATH, "r", encoding="utf-8") as fh:
+                s = fh.read().strip()
+            return s if s else None
+    except Exception as e:
+        st.error(f"Failed to read chosen folder: {e}")
+        return None
+
+    return None
+
+# Replace previous tkinter-based select_folder_dialog with subprocess-based wrapper
+def select_folder_dialog():
+    """
+    Opens native folder dialog in a separate subprocess and returns the chosen folder
+    path (or None if cancelled).
+    """
+    return browse_folder_native_blocking()
+
+# ===================== Utilities =====================
 def list_images(folder):
     return sorted([f for f in os.listdir(folder) if f.lower().endswith(IMG_EXTS)])
 
