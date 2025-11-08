@@ -353,12 +353,24 @@ def page_captioning():
     st.markdown("---")
 
     # Existing captions
+    # Existing captions
     existing = caps_map_full.get(img_name, [])
     st.write(f"**Existing captions for this image:** {len(existing)}")
     if existing:
         with st.expander("Show previous captions"):
             for i, c in enumerate(existing, 1):
-                st.write(f"{i}. {c}")
+                col_cap, col_del = st.columns([8, 1])
+                with col_cap:
+                    st.write(f"{i}. {c}")
+                with col_del:
+                    if st.button(f"🗑️", key=f"del_{img_name}_{i}"):
+                        # Delete this caption
+                        df_caps = ensure_csv(CAPTIONS_FILE, ["image_name", "caption"])
+                        # Remove only the specific caption (match by both image and caption text)
+                        df_caps = df_caps[~((df_caps["image_name"] == img_name) & (df_caps["caption"] == c))]
+                        save_csv_atomic(df_caps, CAPTIONS_FILE)
+                        st.success("Caption deleted.")
+                        st.rerun()
 
     # Add caption
     new_cap = st.text_input("Add a new caption:", key=f"cap_{img_name}")
